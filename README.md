@@ -1,5 +1,5 @@
 # ☕ Java Version Manager
-### by [Utkarsh Ojha](https://github.com/utkarshojha)
+### by [Utkarsh Ojha](https://github.com/utkarsh-ojha)
 
 > Install, switch, and manage multiple Java versions on macOS and Linux — with a single command.
 
