@@ -1338,7 +1338,7 @@ cmd_update() {
   local script_path; script_path=$(realpath "$0")
   info "Checking for updates..."
   if ! command -v curl &>/dev/null; then err "curl is required for updates."; return 1; fi
-  local update_url="${JVM_UPDATE_URL:-https://raw.githubusercontent.com/utkarsh-ojha/utility/mac/jvm}"
+  local update_url="${JVM_UPDATE_URL:-https://github.com/utkarsh-ojha/utility/blob/main/mac/jvm}"
   local tmp; tmp=$(mktemp)
   if curl -fsSL "$update_url" -o "$tmp" 2>/dev/null; then
     chmod +x "$tmp"
