@@ -26,11 +26,18 @@ Managing Java versions on macOS is painful. `JAVA_HOME` breaks, Homebrew install
 
 ---
 
-## Install
+
+## Run the below script with sudo, to install this utility
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/jvm -o ~/Downloads/jvm && chmod +x ~/Downloads/jvm && sudo mv ~/Downloads/jvm /usr/local/bin/jvm
+```
+
+## Install with, one step at a time
 
 ```bash
 # Download and install
-curl -fsSL https://github.com/utkarsh-ojha/utility/blob/main/mac/jvm -o ~/Downloads/jvm
+curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/blob/main/mac/jvm -o ~/Downloads/jvm
 chmod +x ~/Downloads/jvm
 sudo mv ~/Downloads/jvm /usr/local/bin/jvm
 
@@ -150,7 +157,7 @@ Every new terminal picks this up automatically. For the **current terminal**, ru
 
 **1. Download and install the script**
 ```bash
-curl -fsSL https://github.com/utkarsh-ojha/utility/blob/main/mac/jvm -o ~/Downloads/jvm
+curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/blob/main/mac/jvm -o ~/Downloads/jvm
 chmod +x ~/Downloads/jvm
 sudo mv ~/Downloads/jvm /usr/local/bin/jvm
 ```
