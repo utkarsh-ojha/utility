@@ -18,6 +18,7 @@ This repository is a growing toolkit of single-file bash scripts that solve ever
 | 1 | [☕ jvm](mac/jvm/) | **Java Version Manager** — install, switch, and manage multiple Java versions | `curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/jvm/jvm -o ~/Downloads/jvm && chmod +x ~/Downloads/jvm && sudo mv ~/Downloads/jvm /usr/local/bin/jvm` |
 | 2 | [🔌 portman](mac/portman/) | **Port Manager** — find what's running on any port, kill it, list all active ports | `curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/portman/portman -o ~/Downloads/portman && chmod +x ~/Downloads/portman && sudo mv ~/Downloads/portman /usr/local/bin/portman` |
 | 3 | [📋 clip](mac/clip/) | **Clipboard History Manager** — persistent clipboard history with search and recall | `curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/clip/clip -o ~/Downloads/clip && chmod +x ~/Downloads/clip && sudo mv ~/Downloads/clip /usr/local/bin/clip` |
+| 4 | [📂 goto](mac/goto/) | **Directory Bookmark Engine** — persistent directory bookmarks with sub-pathing | `curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/goto/goto -o ~/Downloads/goto && chmod +x ~/Downloads/goto && sudo mv ~/Downloads/goto /usr/local/bin/goto && goto install` |
 
 ---
 
@@ -65,6 +66,22 @@ clip search "api key"     # find matching entries
 ```
 
 > [Full documentation →](mac/clip/README.md)
+
+---
+
+### 📂 goto — Directory Bookmark Engine
+
+Bookmark any directory with a short alias and jump back instantly. Supports sub-pathing, dead link detection, and works across shell restarts.
+
+```bash
+cd ~/projects/myapp
+goto add myapp            # bookmark this directory
+goto myapp                # 🚀 jump back from anywhere
+goto myapp/src            # jump into a sub-path
+goto list                 # see all bookmarks
+```
+
+> [Full documentation →](mac/goto/README.md)
 
 ---
 
