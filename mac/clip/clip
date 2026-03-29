@@ -9,8 +9,8 @@
 #   clip remove <n>       delete a specific entry
 #   clip search <query>   search history for a string
 #   clip clean            wipe all history
-#   clip setup            install clip + auto-start watcher on boot
-#   clip uninstall        undo setup (stop watcher, remove agent & symlink)
+#   clip install          install clip + auto-start watcher on boot
+#   clip uninstall        undo install (stop watcher, remove agent & symlink)
 #   clip start            start the clipboard watcher
 #   clip stop             stop the clipboard watcher
 #   clip status           check if the watcher is running
@@ -48,7 +48,7 @@ step()    { echo -e "  ${MAGENTA}◆${RESET} $*"; }
 
 banner() {
   echo ""
-  echo -e "${CYAN}${BOLD}  📋  clip — Clipboard History Manager${RESET}"
+  echo -e "${CYAN}${BOLD}  📋  clip v${CLIP_VERSION}${RESET}  ${DIM}·  By ${BOLD}UTKARSH OJHA${RESET}${DIM}  ·  Clipboard History Manager${RESET}"
   echo -e "${DIM}  Copy it. Find it. Recall it.${RESET}"
   div; echo ""
 }
@@ -355,11 +355,11 @@ cmd_status() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
-# COMMAND: clip setup
+# COMMAND: clip install
 # Install clip to PATH and configure LaunchAgent for auto-start.
 # ═══════════════════════════════════════════════════════════════════════════════
-cmd_setup() {
-  banner; section "Setup & Install"
+cmd_install() {
+  banner; section "Install"
 
   # Resolve the real path of this script, following all symlinks
   local script_src="$0"
@@ -442,8 +442,9 @@ PLIST
   info "The clipboard watcher is now running in the background."
   info "It will start automatically on every system boot."
   echo ""
-  echo -e "  ${DIM}To check status:${RESET}  ${BOLD}clip status${RESET}"
-  echo -e "  ${DIM}To view history:${RESET}  ${BOLD}clip history${RESET}"
+  echo -e "  ${DIM}To check status:${RESET}   ${BOLD}clip status${RESET}"
+  echo -e "  ${DIM}To view history:${RESET}   ${BOLD}clip history${RESET}"
+  echo -e "  ${DIM}To undo install:${RESET}   ${BOLD}clip uninstall${RESET}"
   echo ""
 }
 
@@ -503,14 +504,14 @@ cmd_uninstall() {
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_help() {
   echo ""
-  echo -e "${CYAN}${BOLD}   ╔═╗╦  ╦╔═╗${RESET}"
-  echo -e "${CYAN}${BOLD}   ║  ║  ║╠═╝${RESET}"
-  echo -e "${CYAN}${BOLD}   ╚═╝╩═╝╩╩  ${RESET}"
+  echo -e "${CYAN}${BOLD}   ╔═╗ ╦   ╦ ╔═╗${RESET}"
+  echo -e "${CYAN}${BOLD}   ║   ║   ║ ╠═╝${RESET}"
+  echo -e "${CYAN}${BOLD}   ╚═╝ ╩═╝ ╩ ╩  ${RESET}"
   echo ""
   echo -e "  ${WHITE}${BOLD}  clip v${CLIP_VERSION}${RESET}  ${DIM}·  By ${BOLD}UTKARSH OJHA${RESET}${DIM}  ·  Clipboard History Manager for macOS${RESET}"
   echo ""
   echo -e "${DIM}  ┌──────────────────────────────────────────────────────────────┐${RESET}"
-  echo -e "${DIM}  │${RESET}  ${WHITE}Copy it. Find it. Recall it.${RESET}                             ${DIM}│${RESET}"
+  echo -e "${DIM}  │${RESET}  ${WHITE}${BOLD}Copy it. Find it. Recall it.${RESET}                             ${DIM}│${RESET}"
   echo -e "${DIM}  └──────────────────────────────────────────────────────────────┘${RESET}"
   echo ""
 
@@ -527,14 +528,18 @@ cmd_help() {
   printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip start"             "start the clipboard watcher"
   printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip stop"              "stop the clipboard watcher"
   printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip status"            "check if watcher is running"
-  printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip setup"             "install + auto-start on boot"
-  printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip uninstall"          "undo setup (stop watcher, remove agent)"
   echo -e "  ${YELLOW}${BOLD}  └────────────────────────────────────────────────────────────┘${RESET}"
   echo ""
 
-  echo -e "  ${MAGENTA}${BOLD}  ┌─ Info ─────────────────────────────────────────────────────┐${RESET}"
-  printf "  ${MAGENTA}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip help"              "this screen"
+  echo -e "  ${MAGENTA}${BOLD}  ┌─ Setup ────────────────────────────────────────────────────┐${RESET}"
+  printf "  ${MAGENTA}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip install"           "install + auto-start on boot"
+  printf "  ${MAGENTA}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip uninstall"         "undo install (stop watcher, remove agent)"
   echo -e "  ${MAGENTA}${BOLD}  └────────────────────────────────────────────────────────────┘${RESET}"
+  echo ""
+
+  echo -e "  ${BLUE}${BOLD}  ┌─ Info ─────────────────────────────────────────────────────┐${RESET}"
+  printf "  ${BLUE}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip help"              "this screen"
+  echo -e "  ${BLUE}${BOLD}  └────────────────────────────────────────────────────────────┘${RESET}"
 
   echo ""
   echo -e "  ${WHITE}${BOLD}  EXAMPLES${RESET}"
@@ -545,14 +550,15 @@ cmd_help() {
   echo -e "    ${DIM}\$${RESET} ${BOLD}clip search \"api key\"${RESET}    ${DIM}# find entries containing \"api key\"${RESET}"
   echo -e "    ${DIM}\$${RESET} ${BOLD}clip remove 5${RESET}            ${DIM}# delete the 5th entry${RESET}"
   echo -e "    ${DIM}\$${RESET} ${BOLD}clip clean${RESET}               ${DIM}# wipe everything${RESET}"
-  echo -e "    ${DIM}\$${RESET} ${BOLD}clip setup${RESET}               ${DIM}# install + auto-start watcher${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}clip install${RESET}             ${DIM}# install + auto-start watcher${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}clip uninstall${RESET}           ${DIM}# undo install${RESET}"
   echo ""
   echo -e "  ${WHITE}${BOLD}  HOW IT WORKS${RESET}"
   echo ""
-  echo -e "    ${DIM}The watcher polls your clipboard (pbpaste) every 1s.${RESET}"
-  echo -e "    ${DIM}Each new entry is Base64-encoded and stored in ~/.clip_history.${RESET}"
-  echo -e "    ${DIM}Duplicates are ignored. History is capped at 100 entries.${RESET}"
-  echo -e "    ${DIM}Use 'clip setup' to auto-start the watcher on every boot.${RESET}"
+  echo -e "    ${CYAN}●${RESET}  The watcher polls your clipboard (${BOLD}pbpaste${RESET}) every 1s"
+  echo -e "    ${CYAN}●${RESET}  Each entry is ${BOLD}Base64-encoded${RESET} and stored in ${BOLD}~/.clip_history${RESET}"
+  echo -e "    ${CYAN}●${RESET}  Duplicates are ${BOLD}ignored${RESET} — history is capped at ${BOLD}100${RESET} entries"
+  echo -e "    ${CYAN}●${RESET}  Use ${BOLD}clip install${RESET} to auto-start the watcher on every boot"
   echo ""
   echo -e "${DIM}  ─────────────────────────────────────────────────────────────${RESET}"
   echo -e "  ${DIM}  Report issues: ${CYAN}https://github.com/utkarsh-ojha/utility${RESET}"
@@ -573,7 +579,7 @@ case "$CMD" in
   start)              cmd_start ;;
   stop)               cmd_stop ;;
   status)             cmd_status ;;
-  setup|install)      cmd_setup ;;
+  install|setup)      cmd_install ;;
   uninstall)           cmd_uninstall ;;
   help|-h|--help)     cmd_help ;;
   *)
