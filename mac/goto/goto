@@ -1,0 +1,526 @@
+#!/usr/bin/env bash
+# =============================================================================
+# goto — Directory Bookmark Engine
+# Persistent directory bookmarks for macOS and Linux with sub-pathing.
+#
+# Usage:
+#   goto add [name]          bookmark current directory (default: folder name)
+#   goto <name>[/sub/path]   jump to bookmarked directory (supports sub-pathing)
+#   goto list                show all bookmarks
+#   goto remove <name>       delete a bookmark
+#   goto clean               wipe all bookmarks
+#   goto install             install goto + inject shell function
+#   goto uninstall           undo install
+#   goto help
+# =============================================================================
+
+set -eo pipefail
+
+# ─── Colours ──────────────────────────────────────────────────────────────────
+BOLD="\033[1m"; DIM="\033[2m"; RESET="\033[0m"
+RED="\033[0;31m"; GREEN="\033[0;32m"; YELLOW="\033[1;33m"
+CYAN="\033[0;36m"; BLUE="\033[0;34m"; MAGENTA="\033[0;35m"
+WHITE="\033[1;37m"; GREY="\033[0;90m"
+
+# ─── Constants ────────────────────────────────────────────────────────────────
+GOTO_VERSION="1.0"
+REGISTRY_FILE="${HOME}/.goto_registry"
+GOTO_MARKER="# >>> goto shell function >>>"
+GOTO_MARKER_END="# <<< goto shell function <<<"
+
+touch "$REGISTRY_FILE"
+
+# ─── Output helpers ───────────────────────────────────────────────────────────
+div()     { echo -e "${DIM}  ────────────────────────────────────────────────────${RESET}"; }
+section() { echo ""; echo -e "  ${CYAN}${BOLD}$1${RESET}"; div; }
+ok()      { echo -e "  ${GREEN}✓${RESET} $*"; }
+warn()    { echo -e "  ${YELLOW}⚠${RESET}  $*"; }
+err()     { echo -e "  ${RED}✗${RESET} $*"; }
+info()    { echo -e "  ${BLUE}→${RESET} $*"; }
+step()    { echo -e "  ${MAGENTA}◆${RESET} $*"; }
+
+banner() {
+  echo ""
+  echo -e "${CYAN}${BOLD}  📂  goto v${GOTO_VERSION}${RESET}  ${DIM}·  By ${BOLD}UTKARSH OJHA${RESET}${DIM}  ·  Directory Bookmark Engine${RESET}"
+  echo -e "${DIM}  Bookmark it. Name it. Jump to it.${RESET}"
+  div; echo ""
+}
+
+# ─── Platform detection ──────────────────────────────────────────────────────
+detect_platform() {
+  case "$(uname -s)" in
+    Darwin) OS="macos" ;;
+    Linux)  OS="linux" ;;
+    *)      OS="unknown" ;;
+  esac
+}
+
+# ─── sed -i compatibility (macOS vs Linux) ───────────────────────────────────
+sed_inplace() {
+  if [[ "$OS" == "macos" ]]; then
+    sed -i '' "$@"
+  else
+    sed -i "$@"
+  fi
+}
+
+# ─── Registry helpers ────────────────────────────────────────────────────────
+# Get path for a given alias
+get_path() {
+  local name="$1"
+  grep "^${name}|" "$REGISTRY_FILE" 2>/dev/null | head -1 | cut -d'|' -f2-
+}
+
+# Check if an alias exists
+alias_exists() {
+  grep -q "^${1}|" "$REGISTRY_FILE" 2>/dev/null
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: goto add [name]
+# Bookmark the current directory under an alias.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_add() {
+  local name="$1"
+
+  # Default to current folder name if no alias given
+  if [[ -z "$name" ]]; then
+    name=$(basename "$PWD")
+  fi
+
+  # Validate alias name
+  if [[ "$name" =~ [^a-zA-Z0-9._-] ]]; then
+    err "Invalid alias: '${name}' — use only letters, numbers, dots, hyphens, underscores"
+    echo ""; return 1
+  fi
+
+  banner; section "Add Bookmark"
+
+  local current_path="$PWD"
+
+  if alias_exists "$name"; then
+    local existing; existing=$(get_path "$name")
+    if [[ "$existing" == "$current_path" ]]; then
+      ok "Bookmark '${CYAN}${BOLD}${name}${RESET}' already points to this directory"
+      echo ""; return 0
+    fi
+    warn "Alias '${CYAN}${BOLD}${name}${RESET}' already exists → ${DIM}${existing}${RESET}"
+    echo ""
+    read -rp "$(echo -e "  ${YELLOW}${BOLD}Overwrite? [y/N]:${RESET} ")" confirm
+    [[ ! "$confirm" =~ ^[Yy]$ ]] && { echo ""; warn "Aborted."; echo ""; return 0; }
+
+    # Remove old entry
+    sed_inplace "/^${name}|/d" "$REGISTRY_FILE"
+  fi
+
+  echo "${name}|${current_path}" >> "$REGISTRY_FILE"
+
+  echo ""
+  ok "Bookmarked '${CYAN}${BOLD}${name}${RESET}' → ${GREEN}${BOLD}${current_path}${RESET}"
+  echo -e "  ${DIM}Jump back anytime: ${BOLD}goto ${name}${RESET}"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: goto <name>[/sub/path]  (jump)
+# Jump to a bookmarked directory. Supports sub-pathing.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_jump() {
+  local input="$1"
+  [[ -z "$input" ]] && { cmd_help; return 0; }
+
+  # Split name and optional sub-path
+  local name sub_path
+  name=$(echo "$input" | cut -d'/' -f1)
+  sub_path=$(echo "$input" | cut -s -d'/' -f2-)
+
+  if ! alias_exists "$name"; then
+    err "Bookmark '${name}' not found"
+    echo ""
+    info "Add it first: ${BOLD}goto add ${name}${RESET}"
+    echo ""; return 1
+  fi
+
+  local target; target=$(get_path "$name")
+
+  # Append sub-path if provided
+  if [[ -n "$sub_path" ]]; then
+    target="${target}/${sub_path}"
+  fi
+
+  # Validate the target exists
+  if [[ ! -d "$target" ]]; then
+    echo ""
+    err "Path does not exist: ${DIM}${target}${RESET}"
+    echo ""
+
+    # Offer to remove dead bookmark
+    if [[ -z "$sub_path" ]]; then
+      read -rp "$(echo -e "  ${YELLOW}${BOLD}Remove dead bookmark '${name}'? [y/N]:${RESET} ")" confirm
+      if [[ "$confirm" =~ ^[Yy]$ ]]; then
+        sed_inplace "/^${name}|/d" "$REGISTRY_FILE"
+        ok "Removed dead bookmark '${name}'"
+      fi
+    else
+      info "Base bookmark '${CYAN}${name}${RESET}' exists but sub-path '${DIM}${sub_path}${RESET}' doesn't"
+    fi
+    echo ""; return 1
+  fi
+
+  # Output for the shell function wrapper to cd into
+  # When called with --resolve, just print the path (used by shell wrapper)
+  echo "__goto_cd__:${target}"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: goto list
+# Show all bookmarks as a color-coded table.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_list() {
+  banner; section "📂  Bookmarks"
+
+  local total; total=$(wc -l < "$REGISTRY_FILE" | tr -d ' ')
+  if [[ "$total" -eq 0 ]]; then
+    info "No bookmarks yet. Add one with ${BOLD}goto add [name]${RESET}"
+    echo ""; return 0
+  fi
+
+  # Header
+  printf "  ${BOLD}%-20s  %s${RESET}\n" "ALIAS" "PATH"
+  div
+
+  local dead=0
+  while IFS='|' read -r name path; do
+    [[ -z "$name" ]] && continue
+
+    if [[ -d "$path" ]]; then
+      printf "  ${CYAN}${BOLD}%-20s${RESET}  ${GREEN}%s${RESET}\n" "$name" "$path"
+    else
+      printf "  ${CYAN}${BOLD}%-20s${RESET}  ${RED}%s  ${DIM}(not found)${RESET}\n" "$name" "$path"
+      dead=$((dead + 1))
+    fi
+  done < "$REGISTRY_FILE"
+
+  echo ""
+  ok "${total} bookmark(s) registered"
+  if [[ "$dead" -gt 0 ]]; then
+    warn "${dead} dead bookmark(s) — paths no longer exist"
+    info "Remove them: ${BOLD}goto remove <name>${RESET}"
+  fi
+  info "Jump to any: ${BOLD}goto <name>${RESET}   Sub-path: ${BOLD}goto <name>/src${RESET}"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: goto remove <name>
+# Delete a specific bookmark.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_remove() {
+  local name="$1"
+  [[ -z "$name" ]] && { err "Usage: goto remove <name>"; echo ""; return 1; }
+
+  banner; section "Remove Bookmark"
+
+  if ! alias_exists "$name"; then
+    err "Bookmark '${name}' not found"
+    echo ""; return 1
+  fi
+
+  local path; path=$(get_path "$name")
+  warn "Removing: ${CYAN}${BOLD}${name}${RESET} → ${DIM}${path}${RESET}"
+
+  sed_inplace "/^${name}|/d" "$REGISTRY_FILE"
+
+  ok "Bookmark '${CYAN}${BOLD}${name}${RESET}' removed"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: goto clean
+# Wipe all bookmarks.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_clean() {
+  banner; section "Clean All Bookmarks"
+
+  local total; total=$(wc -l < "$REGISTRY_FILE" | tr -d ' ')
+  if [[ "$total" -eq 0 ]]; then
+    info "Registry is already empty."
+    echo ""; return 0
+  fi
+
+  warn "${total} bookmark(s) will be permanently deleted."
+  echo ""
+  read -rp "$(echo -e "  ${RED}${BOLD}Wipe all bookmarks? [y/N]:${RESET} ")" confirm
+  [[ ! "$confirm" =~ ^[Yy]$ ]] && { warn "Aborted."; echo ""; return 0; }
+
+  : > "$REGISTRY_FILE"
+  echo ""
+  ok "All bookmarks wiped"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Shell function wrapper content
+# This is what gets injected into .zshrc / .bashrc
+# ═══════════════════════════════════════════════════════════════════════════════
+shell_function_content() {
+  cat <<'FUNC'
+# >>> goto shell function >>>
+goto() {
+  if [[ $# -eq 0 ]]; then
+    command goto help
+    return
+  fi
+  local output
+  output=$(command goto "$@" 2>&1)
+  local exit_code=$?
+  # Check if the output contains a cd directive
+  if echo "$output" | grep -q "^__goto_cd__:"; then
+    local target
+    target=$(echo "$output" | grep "^__goto_cd__:" | head -1 | sed 's/^__goto_cd__://')
+    cd "$target" && echo -e "  \033[0;32m\033[1m🚀  Jumped to:\033[0m \033[1m$target\033[0m"
+  else
+    echo "$output"
+  fi
+  return $exit_code
+}
+# <<< goto shell function <<<
+FUNC
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# Detect shell config file
+# ═══════════════════════════════════════════════════════════════════════════════
+detect_shell_rc() {
+  local current_shell
+  current_shell=$(basename "${SHELL:-/bin/bash}")
+
+  case "$current_shell" in
+    zsh)  echo "${HOME}/.zshrc" ;;
+    bash)
+      # Prefer .bashrc, fall back to .bash_profile on macOS
+      if [[ -f "${HOME}/.bashrc" ]]; then
+        echo "${HOME}/.bashrc"
+      elif [[ -f "${HOME}/.bash_profile" ]]; then
+        echo "${HOME}/.bash_profile"
+      else
+        echo "${HOME}/.bashrc"
+      fi
+      ;;
+    *)    echo "${HOME}/.bashrc" ;;
+  esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: goto install
+# Install goto to PATH and inject shell function wrapper.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_install() {
+  banner; section "Install"
+
+  # Resolve the real path of this script, following all symlinks
+  local script_src="$0"
+  while [[ -L "$script_src" ]]; do
+    local link_target; link_target=$(readlink "$script_src")
+    if [[ "$link_target" == /* ]]; then
+      script_src="$link_target"
+    else
+      script_src="$(cd "$(dirname "$script_src")" && pwd)/${link_target}"
+    fi
+  done
+  script_src="$(cd "$(dirname "$script_src")" && pwd)/$(basename "$script_src")"
+
+  local install_path="/usr/local/bin/goto"
+
+  # Step 1: Symlink to /usr/local/bin
+  step "Installing goto to ${install_path}..."
+
+  if [[ "$script_src" == "$install_path" ]]; then
+    ok "goto is already installed at ${install_path} — skipping symlink"
+  else
+    if [[ -L "$install_path" || -f "$install_path" ]]; then
+      warn "${install_path} already exists — replacing"
+      if [[ -w "/usr/local/bin" ]]; then
+        rm -f "$install_path"
+      else
+        sudo rm -f "$install_path"
+      fi
+    fi
+
+    if [[ -w "/usr/local/bin" ]]; then
+      ln -sf "$script_src" "$install_path"
+    else
+      info "Requires sudo to write to /usr/local/bin"
+      sudo ln -sf "$script_src" "$install_path"
+    fi
+    ok "Symlinked ${install_path} → ${script_src}"
+  fi
+
+  # Step 2: Detect shell and inject function
+  local rc_file; rc_file=$(detect_shell_rc)
+  step "Injecting shell function into ${rc_file}..."
+
+  if [[ -f "$rc_file" ]] && grep -q "$GOTO_MARKER" "$rc_file" 2>/dev/null; then
+    ok "Shell function already present in ${rc_file} — skipping"
+  else
+    touch "$rc_file"
+    echo "" >> "$rc_file"
+    shell_function_content >> "$rc_file"
+    ok "Shell function injected into ${rc_file}"
+  fi
+
+  echo ""
+  ok "Install complete!"
+  echo ""
+  info "Restart your terminal or run:"
+  echo -e "    ${BOLD}source ${rc_file}${RESET}"
+  echo ""
+  echo -e "  ${DIM}Then try:${RESET}"
+  echo -e "    ${BOLD}goto add myproject${RESET}    ${DIM}# bookmark current dir${RESET}"
+  echo -e "    ${BOLD}goto myproject${RESET}        ${DIM}# jump back anytime${RESET}"
+  echo -e "    ${DIM}To undo:${RESET}   ${BOLD}goto uninstall${RESET}"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: goto uninstall
+# Undo install — remove symlink, shell function, and registry.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_uninstall() {
+  banner; section "Uninstall"
+
+  local install_path="/usr/local/bin/goto"
+
+  # Step 1: Remove shell function from rc file
+  local rc_file; rc_file=$(detect_shell_rc)
+  step "Removing shell function from ${rc_file}..."
+
+  if [[ -f "$rc_file" ]] && grep -q "$GOTO_MARKER" "$rc_file" 2>/dev/null; then
+    # Remove everything between the markers (inclusive)
+    if [[ "$OS" == "macos" ]]; then
+      sed -i '' "/${GOTO_MARKER}/,/${GOTO_MARKER_END}/d" "$rc_file"
+    else
+      sed -i "/${GOTO_MARKER}/,/${GOTO_MARKER_END}/d" "$rc_file"
+    fi
+    # Remove trailing blank line left behind
+    if [[ "$OS" == "macos" ]]; then
+      sed -i '' -e :a -e '/^\n*$/{$d;N;ba' -e '}' "$rc_file" 2>/dev/null || true
+    fi
+    ok "Shell function removed from ${rc_file}"
+  else
+    info "No shell function found in ${rc_file} — skipping"
+  fi
+
+  # Step 2: Remove symlink
+  step "Removing ${install_path}..."
+  if [[ -L "$install_path" || -f "$install_path" ]]; then
+    if [[ -w "/usr/local/bin" ]]; then
+      rm -f "$install_path"
+    else
+      info "Requires sudo to remove ${install_path}"
+      sudo rm -f "$install_path"
+    fi
+    ok "Removed ${install_path}"
+  else
+    info "${install_path} not found — skipping"
+  fi
+
+  # Step 3: Remove registry
+  step "Removing bookmark registry..."
+  if [[ -f "$REGISTRY_FILE" ]]; then
+    rm -f "$REGISTRY_FILE"
+    ok "Registry file removed"
+  else
+    info "No registry file found — skipping"
+  fi
+
+  echo ""
+  ok "Uninstall complete!"
+  echo ""
+  info "Shell function has been removed."
+  info "Restart your terminal or run: ${BOLD}source ${rc_file}${RESET}"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: goto help
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_help() {
+  echo ""
+  echo -e "${CYAN}${BOLD}   ╔═╗╔═╗╔╦╗╔═╗${RESET}"
+  echo -e "${CYAN}${BOLD}   ║ ╦║ ║ ║ ║ ║${RESET}"
+  echo -e "${CYAN}${BOLD}   ╚═╝╚═╝ ╩ ╚═╝${RESET}"
+  echo ""
+  echo -e "  ${WHITE}${BOLD}  goto v${GOTO_VERSION}${RESET}  ${DIM}·  By ${BOLD}UTKARSH OJHA${RESET}${DIM}  ·  Directory Bookmark Engine for macOS & Linux${RESET}"
+  echo ""
+  echo -e "${DIM}  ┌──────────────────────────────────────────────────────────────┐${RESET}"
+  echo -e "${DIM}  │${RESET}  ${WHITE}${BOLD}Bookmark it. Name it. Jump to it.${RESET}                        ${DIM}│${RESET}"
+  echo -e "${DIM}  └──────────────────────────────────────────────────────────────┘${RESET}"
+  echo ""
+
+  echo -e "  ${CYAN}${BOLD}  ┌─ Core ─────────────────────────────────────────────────────┐${RESET}"
+  printf "  ${CYAN}  │${RESET}  ${GREEN}${BOLD}%-28s${RESET}  %s\n" "goto add [name]"           "bookmark current directory"
+  printf "  ${CYAN}  │${RESET}  ${GREEN}${BOLD}%-28s${RESET}  %s\n" "goto <name>"               "jump to bookmarked directory"
+  printf "  ${CYAN}  │${RESET}  ${GREEN}${BOLD}%-28s${RESET}  %s\n" "goto <name>/sub/path"      "jump + sub-path into bookmark"
+  printf "  ${CYAN}  │${RESET}  ${GREEN}${BOLD}%-28s${RESET}  %s\n" "goto list"                 "show all bookmarks"
+  printf "  ${CYAN}  │${RESET}  ${GREEN}${BOLD}%-28s${RESET}  %s\n" "goto remove <name>"        "delete a bookmark"
+  printf "  ${CYAN}  │${RESET}  ${GREEN}${BOLD}%-28s${RESET}  %s\n" "goto clean"                "wipe all bookmarks"
+  echo -e "  ${CYAN}${BOLD}  └────────────────────────────────────────────────────────────┘${RESET}"
+  echo ""
+
+  echo -e "  ${YELLOW}${BOLD}  ┌─ Setup ────────────────────────────────────────────────────┐${RESET}"
+  printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-28s${RESET}  %s\n" "goto install"              "install + inject shell function"
+  printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-28s${RESET}  %s\n" "goto uninstall"            "undo install (remove everything)"
+  echo -e "  ${YELLOW}${BOLD}  └────────────────────────────────────────────────────────────┘${RESET}"
+  echo ""
+
+  echo -e "  ${MAGENTA}${BOLD}  ┌─ Info ─────────────────────────────────────────────────────┐${RESET}"
+  printf "  ${MAGENTA}  │${RESET}  ${GREEN}${BOLD}%-28s${RESET}  %s\n" "goto help"                 "this screen"
+  echo -e "  ${MAGENTA}${BOLD}  └────────────────────────────────────────────────────────────┘${RESET}"
+
+  echo ""
+  echo -e "  ${WHITE}${BOLD}  EXAMPLES${RESET}"
+  echo ""
+  echo -e "    ${DIM}\$${RESET} ${BOLD}cd ~/projects/myapp${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}goto add myapp${RESET}           ${DIM}# bookmark this directory${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}goto add${RESET}                 ${DIM}# auto-name from folder: 'myapp'${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}goto myapp${RESET}               ${DIM}# 🚀 jump back anytime${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}goto myapp/src${RESET}           ${DIM}# jump to myapp + /src sub-path${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}goto list${RESET}                ${DIM}# see all bookmarks${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}goto remove myapp${RESET}        ${DIM}# delete a bookmark${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}goto clean${RESET}               ${DIM}# wipe everything${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}goto install${RESET}             ${DIM}# one-time install${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}goto uninstall${RESET}           ${DIM}# undo install${RESET}"
+  echo ""
+  echo -e "  ${WHITE}${BOLD}  HOW IT WORKS${RESET}"
+  echo ""
+  echo -e "    ${CYAN}●${RESET}  Bookmarks are stored in ${BOLD}~/.goto_registry${RESET} as ${BOLD}alias|path${RESET}"
+  echo -e "    ${CYAN}●${RESET}  A ${BOLD}shell function wrapper${RESET} is injected into your .zshrc/.bashrc"
+  echo -e "    ${CYAN}●${RESET}  The function calls the script, captures the target path, and runs ${BOLD}cd${RESET}"
+  echo -e "    ${CYAN}●${RESET}  Sub-pathing lets you ${BOLD}goto project/src/components${RESET}"
+  echo -e "    ${CYAN}●${RESET}  Dead bookmarks are ${BOLD}detected and offered for removal${RESET}"
+  echo ""
+  echo -e "${DIM}  ─────────────────────────────────────────────────────────────${RESET}"
+  echo -e "  ${DIM}  Report issues: ${CYAN}https://github.com/utkarsh-ojha/utility${RESET}"
+  echo ""
+}
+
+# ─── Entry point ──────────────────────────────────────────────────────────────
+detect_platform
+
+CMD="${1:-help}"
+shift || true
+
+case "$CMD" in
+  add)                cmd_add "${1:-}" ;;
+  list|ls)            cmd_list ;;
+  remove|rm)          cmd_remove "${1:-}" ;;
+  clean)              cmd_clean ;;
+  install)            cmd_install ;;
+  uninstall)          cmd_uninstall ;;
+  help|-h|--help)     cmd_help ;;
+  *)
+    # Treat as a jump target (goto <name> or goto <name>/sub/path)
+    cmd_jump "$CMD"
+    ;;
+esac
