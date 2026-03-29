@@ -10,6 +10,7 @@
 #   clip search <query>   search history for a string
 #   clip clean            wipe all history
 #   clip setup            install clip + auto-start watcher on boot
+#   clip uninstall        undo setup (stop watcher, remove agent & symlink)
 #   clip start            start the clipboard watcher
 #   clip stop             stop the clipboard watcher
 #   clip status           check if the watcher is running
@@ -447,6 +448,57 @@ PLIST
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: clip uninstall
+# Undo clip setup — stop watcher, remove LaunchAgent, remove symlink.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_uninstall() {
+  banner; section "Uninstall"
+
+  local install_path="/usr/local/bin/clip"
+
+  # Step 1: Stop the watcher if running
+  step "Stopping watcher..."
+  if [[ -f "$PID_FILE" ]]; then
+    local watcher_pid; watcher_pid=$(cat "$PID_FILE")
+    kill "$watcher_pid" 2>/dev/null || true
+    rm -f "$PID_FILE"
+  fi
+  ok "Watcher stopped"
+
+  # Step 2: Unload and remove LaunchAgent
+  step "Removing LaunchAgent..."
+  if [[ -f "$PLIST_PATH" ]]; then
+    launchctl unload "$PLIST_PATH" 2>/dev/null || true
+    rm -f "$PLIST_PATH"
+    ok "LaunchAgent unloaded and removed"
+  else
+    info "No LaunchAgent found — skipping"
+  fi
+
+  # Step 3: Remove symlink from /usr/local/bin
+  step "Removing ${install_path}..."
+  if [[ -L "$install_path" || -f "$install_path" ]]; then
+    if [[ -w "/usr/local/bin" ]]; then
+      rm -f "$install_path"
+    else
+      info "Requires sudo to remove ${install_path}"
+      sudo rm -f "$install_path"
+    fi
+    ok "Removed ${install_path}"
+  else
+    info "${install_path} not found — skipping"
+  fi
+
+  echo ""
+  ok "Uninstall complete!"
+  echo ""
+  info "The clipboard watcher has been stopped."
+  info "LaunchAgent has been removed — watcher will no longer auto-start."
+  info "History file at ${BOLD}${HISTORY_FILE}${RESET} was kept. Delete manually if needed."
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: clip help
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_help() {
@@ -476,6 +528,7 @@ cmd_help() {
   printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip stop"              "stop the clipboard watcher"
   printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip status"            "check if watcher is running"
   printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip setup"             "install + auto-start on boot"
+  printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip uninstall"          "undo setup (stop watcher, remove agent)"
   echo -e "  ${YELLOW}${BOLD}  └────────────────────────────────────────────────────────────┘${RESET}"
   echo ""
 
@@ -521,6 +574,7 @@ case "$CMD" in
   stop)               cmd_stop ;;
   status)             cmd_status ;;
   setup|install)      cmd_setup ;;
+  uninstall)           cmd_uninstall ;;
   help|-h|--help)     cmd_help ;;
   *)
     err "Unknown command: ${CMD}"

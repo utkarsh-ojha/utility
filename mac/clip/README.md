@@ -81,6 +81,7 @@ After running `clip setup`, the watcher starts automatically on every boot. No m
 | `clip stop` | Stop the clipboard watcher |
 | `clip status` | Check if the watcher is running |
 | `clip setup` | Install clip + auto-start watcher on boot |
+| `clip uninstall` | Undo setup — stop watcher, remove LaunchAgent & symlink |
 | `clip help` | Full help screen |
 
 ---
@@ -113,6 +114,9 @@ clip status               # is it running?
 
 # One-time setup (installs + auto-start on boot)
 clip setup
+
+# Undo setup (stop watcher, remove LaunchAgent & symlink)
+clip uninstall
 ```
 
 ---
@@ -134,6 +138,15 @@ Running `clip setup` creates a macOS LaunchAgent at:
 ```
 
 This ensures the clipboard watcher starts automatically on every system boot via `launchctl`.
+
+### Uninstall
+
+Running `clip uninstall` reverses the setup:
+
+- Stops the running watcher process
+- Unloads and removes the LaunchAgent plist
+- Removes the `/usr/local/bin/clip` symlink
+- Keeps `~/.clip_history` intact (delete manually if needed)
 
 ---
 
