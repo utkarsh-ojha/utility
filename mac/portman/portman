@@ -1,0 +1,580 @@
+#!/usr/bin/env bash
+# =============================================================================
+# portman — Port Manager
+# Find what's running on any port, kill it, list all active ports.
+#
+# Usage:
+#   portman <port>        show what's on this port
+#   portman kill <port>   kill the process on this port
+#   portman list          show all active listening ports
+#   portman watch <port>  live-watch a port (refresh every 2s)
+#   portman help
+# =============================================================================
+
+set -eo pipefail
+
+# ─── Colours ──────────────────────────────────────────────────────────────────
+BOLD="\033[1m"; DIM="\033[2m"; RESET="\033[0m"
+RED="\033[0;31m"; GREEN="\033[0;32m"; YELLOW="\033[1;33m"
+CYAN="\033[0;36m"; BLUE="\033[0;34m"; MAGENTA="\033[0;35m"
+WHITE="\033[1;37m"
+
+# ─── Data paths ───────────────────────────────────────────────────────────────
+PORTMAN_DATA_DIR="${HOME}/.portman"
+PORTMAN_HISTORY_FILE="${PORTMAN_DATA_DIR}/history"
+
+mkdir -p "$PORTMAN_DATA_DIR"
+touch "$PORTMAN_HISTORY_FILE"
+
+# ─── Output helpers ───────────────────────────────────────────────────────────
+div()     { echo -e "${DIM}  ────────────────────────────────────────────────────${RESET}"; }
+section() { echo ""; echo -e "  ${CYAN}${BOLD}$1${RESET}"; div; }
+ok()      { echo -e "  ${GREEN}✓${RESET} $*"; }
+warn()    { echo -e "  ${YELLOW}⚠${RESET}  $*"; }
+err()     { echo -e "  ${RED}✗${RESET} $*"; }
+info()    { echo -e "  ${BLUE}→${RESET} $*"; }
+step()    { echo -e "  ${MAGENTA}◆${RESET} $*"; }
+
+banner() {
+  echo ""
+  echo -e "${CYAN}${BOLD}  🔌  portman — Port Manager${RESET}"
+  echo -e "${DIM}  Find it. Kill it. Own the port.${RESET}"
+  div; echo ""
+}
+
+# ─── Platform detection ───────────────────────────────────────────────────────
+detect_platform() {
+  case "$(uname -s)" in
+    Darwin) OS="macos" ;;
+    Linux)  OS="linux" ;;
+    *)      OS="unknown" ;;
+  esac
+}
+
+# ─── Core: get process info for a port ───────────────────────────────────────
+# Returns lines: PID PROTO USER PROCESS_NAME COMMAND
+get_port_info() {
+  local port="$1"
+  local results=()
+
+  if [[ "$OS" == "macos" ]]; then
+    # lsof is the most reliable on macOS
+    while IFS= read -r line; do
+      [[ -z "$line" ]] && continue
+      results+=("$line")
+    done < <(lsof -nP -i ":${port}" 2>/dev/null | grep -v "^COMMAND" || true)
+  else
+    # ss is preferred on Linux, fall back to netstat
+    if command -v ss &>/dev/null; then
+      while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        results+=("$line")
+      done < <(ss -tlnp "sport = :${port}" 2>/dev/null | grep -v "^Netid" || true)
+    elif command -v netstat &>/dev/null; then
+      while IFS= read -r line; do
+        [[ -z "$line" ]] && continue
+        results+=("$line")
+      done < <(netstat -tlnp 2>/dev/null | grep ":${port}" || true)
+    fi
+  fi
+
+  printf '%s\n' "${results[@]:-}"
+}
+
+# Extract PIDs from port info
+get_pids_for_port() {
+  local port="$1"
+  local pids=()
+
+  if [[ "$OS" == "macos" ]]; then
+    while IFS= read -r pid; do
+      [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]] && pids+=("$pid")
+    done < <(lsof -t -i ":${port}" 2>/dev/null || true)
+  else
+    # Try lsof first, then ss+awk
+    if command -v lsof &>/dev/null; then
+      while IFS= read -r pid; do
+        [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]] && pids+=("$pid")
+      done < <(lsof -t -i ":${port}" 2>/dev/null || true)
+    elif command -v ss &>/dev/null; then
+      while IFS= read -r pid; do
+        [[ -n "$pid" && "$pid" =~ ^[0-9]+$ ]] && pids+=("$pid")
+      done < <(ss -tlnp "sport = :${port}" 2>/dev/null | \
+        grep -oP 'pid=\K[0-9]+' || true)
+    fi
+  fi
+
+  # Deduplicate
+  local seen=()
+  for p in "${pids[@]:-}"; do
+    local dup=false
+    for s in "${seen[@]:-}"; do [[ "$s" == "$p" ]] && dup=true && break; done
+    $dup || { seen+=("$p"); echo "$p"; }
+  done
+}
+
+# Get a friendly process name for a PID
+get_process_name() {
+  local pid="$1"
+  if [[ "$OS" == "macos" ]]; then
+    ps -p "$pid" -o comm= 2>/dev/null | xargs basename 2>/dev/null || echo "unknown"
+  else
+    cat "/proc/${pid}/comm" 2>/dev/null || \
+    ps -p "$pid" -o comm= 2>/dev/null | xargs basename 2>/dev/null || echo "unknown"
+  fi
+}
+
+# Get full command line for a PID
+get_process_cmd() {
+  local pid="$1"
+  if [[ "$OS" == "macos" ]]; then
+    ps -p "$pid" -o args= 2>/dev/null | head -c 80 || echo ""
+  else
+    tr '\0' ' ' < "/proc/${pid}/cmdline" 2>/dev/null | head -c 80 || \
+    ps -p "$pid" -o args= 2>/dev/null | head -c 80 || echo ""
+  fi
+}
+
+# Get process owner
+get_process_user() {
+  local pid="$1"
+  ps -p "$pid" -o user= 2>/dev/null | tr -d ' ' || echo "unknown"
+}
+
+# Log to history
+log_history() {
+  echo "$(date '+%Y-%m-%d %H:%M:%S')  $*" >> "$PORTMAN_HISTORY_FILE"
+}
+
+# ─── Port validation ──────────────────────────────────────────────────────────
+validate_port() {
+  local port="$1"
+  if ! [[ "$port" =~ ^[0-9]+$ ]]; then
+    err "Invalid port: '${port}' — must be a number"; echo ""; return 1
+  fi
+  if [[ "$port" -lt 1 || "$port" -gt 65535 ]]; then
+    err "Invalid port: ${port} — must be between 1 and 65535"; echo ""; return 1
+  fi
+  return 0
+}
+
+# ─── Well-known port names ────────────────────────────────────────────────────
+known_port_name() {
+  case "$1" in
+    80)    echo "HTTP" ;;
+    443)   echo "HTTPS" ;;
+    3000)  echo "Node/React dev" ;;
+    3001)  echo "React dev (alt)" ;;
+    4000)  echo "Phoenix/GraphQL" ;;
+    4200)  echo "Angular dev" ;;
+    5000)  echo "Flask/Python" ;;
+    5173)  echo "Vite dev" ;;
+    5432)  echo "PostgreSQL" ;;
+    6379)  echo "Redis" ;;
+    8000)  echo "Django/Python" ;;
+    8080)  echo "HTTP alt / Java" ;;
+    8443)  echo "HTTPS alt" ;;
+    8888)  echo "Jupyter" ;;
+    9000)  echo "PHP-FPM / SonarQube" ;;
+    9200)  echo "Elasticsearch" ;;
+    27017) echo "MongoDB" ;;
+    3306)  echo "MySQL" ;;
+    1433)  echo "MSSQL" ;;
+    5601)  echo "Kibana" ;;
+    *)     echo "" ;;
+  esac
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: portman <port>
+# Show what's running on a given port.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_show() {
+  local port="$1"
+  validate_port "$port" || return 1
+  banner
+
+  local port_label; port_label=$(known_port_name "$port")
+  [[ -n "$port_label" ]] && \
+    section "Port ${port}  ${DIM}(${port_label})${RESET}" || \
+    section "Port ${port}"
+
+  local pids=()
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && pids+=("$pid")
+  done < <(get_pids_for_port "$port")
+
+  if [[ ${#pids[@]} -eq 0 ]]; then
+    ok "Port ${port} is ${GREEN}free${RESET} — nothing running here"
+    echo ""; return 0
+  fi
+
+  echo -e "  ${RED}${BOLD}Port ${port} is in use${RESET}"; echo ""
+
+  for pid in "${pids[@]}"; do
+    local name; name=$(get_process_name "$pid")
+    local user; user=$(get_process_user "$pid")
+    local cmd;  cmd=$(get_process_cmd "$pid")
+
+    echo -e "  ${RED}●${RESET}  ${BOLD}PID ${pid}${RESET}  ${DIM}(${user})${RESET}"
+    echo -e "     ${WHITE}Process:${RESET} ${name}"
+    echo -e "     ${WHITE}Command:${RESET} ${DIM}${cmd}${RESET}"
+    echo ""
+  done
+
+  echo -e "  ${DIM}To kill it:${RESET}  ${BOLD}portman kill ${port}${RESET}"
+  echo ""
+
+  log_history "show ${port} — PID(s): ${pids[*]}"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: portman kill <port>
+# Kill all processes on a given port, with confirmation.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_kill() {
+  local port="$1"
+  validate_port "$port" || return 1
+  banner; section "Kill Port ${port}"
+
+  local pids=()
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && pids+=("$pid")
+  done < <(get_pids_for_port "$port")
+
+  if [[ ${#pids[@]} -eq 0 ]]; then
+    ok "Port ${port} is already free — nothing to kill"
+    echo ""; return 0
+  fi
+
+  # Show what will be killed
+  echo -e "  ${YELLOW}The following process(es) will be killed:${RESET}"; echo ""
+  for pid in "${pids[@]}"; do
+    local name; name=$(get_process_name "$pid")
+    local user; user=$(get_process_user "$pid")
+    warn "PID ${BOLD}${pid}${RESET}  ${name}  ${DIM}(${user})${RESET}"
+  done
+  echo ""
+
+  read -rp "$(echo -e "  ${RED}${BOLD}Kill process(es) on port ${port}? [y/N]:${RESET} ")" confirm
+  [[ ! "$confirm" =~ ^[Yy]$ ]] && { warn "Aborted."; echo ""; return 0; }
+
+  echo ""
+  local killed=0; local failed=0
+
+  for pid in "${pids[@]}"; do
+    local name; name=$(get_process_name "$pid")
+    step "Killing PID ${pid} (${name})..."
+
+    # Try SIGTERM first, then SIGKILL
+    if kill -TERM "$pid" 2>/dev/null; then
+      sleep 0.5
+      # Check if still alive
+      if kill -0 "$pid" 2>/dev/null; then
+        warn "Process didn't terminate, sending SIGKILL..."
+        kill -KILL "$pid" 2>/dev/null && ok "Killed PID ${pid} (SIGKILL)" || \
+          { err "Could not kill PID ${pid} — try: sudo kill -9 ${pid}"; failed=$((failed+1)); }
+      else
+        ok "Killed PID ${pid} (${name})"
+        killed=$((killed+1))
+      fi
+    else
+      warn "Permission denied for PID ${pid} — trying with sudo..."
+      if sudo kill -TERM "$pid" 2>/dev/null; then
+        ok "Killed PID ${pid} with sudo"
+        killed=$((killed+1))
+      else
+        err "Could not kill PID ${pid}"
+        failed=$((failed+1))
+      fi
+    fi
+  done
+
+  echo ""
+  # Verify the port is now free
+  sleep 0.3
+  local remaining=()
+  while IFS= read -r pid; do
+    [[ -n "$pid" ]] && remaining+=("$pid")
+  done < <(get_pids_for_port "$port")
+
+  if [[ ${#remaining[@]} -eq 0 ]]; then
+    ok "Port ${port} is now ${GREEN}free${RESET} ✓"
+  else
+    warn "Port ${port} still has process(es) running — they may restart automatically"
+  fi
+
+  [[ $failed -gt 0 ]] && err "${failed} process(es) could not be killed"
+
+  log_history "kill ${port} — killed: ${killed}, failed: ${failed}"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: portman list
+# Show all active listening ports on this machine.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_list() {
+  banner; section "Active Listening Ports"
+
+  local -a port_lines=()
+
+  if [[ "$OS" == "macos" ]]; then
+    while IFS= read -r line; do
+      [[ -n "$line" ]] && port_lines+=("$line")
+    done < <(lsof -nP -iTCP -sTCP:LISTEN 2>/dev/null | grep -v "^COMMAND" || true)
+  else
+    if command -v ss &>/dev/null; then
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && port_lines+=("$line")
+      done < <(ss -tlnp 2>/dev/null | grep -v "^Netid" || true)
+    elif command -v netstat &>/dev/null; then
+      while IFS= read -r line; do
+        [[ -n "$line" ]] && port_lines+=("$line")
+      done < <(netstat -tlnp 2>/dev/null | grep "LISTEN" || true)
+    fi
+  fi
+
+  if [[ ${#port_lines[@]} -eq 0 ]]; then
+    info "No active listening ports found."
+    echo ""; return 0
+  fi
+
+  # Parse and display
+  local -a seen_ports=()
+  local -a display_rows=()
+
+  if [[ "$OS" == "macos" ]]; then
+    for line in "${port_lines[@]}"; do
+      local cmd_name pid user proto addr
+      cmd_name=$(echo "$line" | awk '{print $1}')
+      pid=$(echo "$line" | awk '{print $2}')
+      user=$(echo "$line" | awk '{print $3}')
+      proto=$(echo "$line" | awk '{print $8}')
+      addr=$(echo "$line" | awk '{print $9}')
+      local port; port=$(echo "$addr" | grep -oE ':[0-9]+$' | tr -d ':')
+
+      [[ -z "$port" ]] && continue
+
+      # Dedup by port
+      local dup=false
+      for sp in "${seen_ports[@]:-}"; do [[ "$sp" == "$port" ]] && dup=true && break; done
+      $dup && continue
+      seen_ports+=("$port")
+
+      local label; label=$(known_port_name "$port")
+      display_rows+=("${port}|${cmd_name}|${pid}|${user}|${label}")
+    done
+  else
+    # Linux — parse ss output
+    for line in "${port_lines[@]}"; do
+      local port; port=$(echo "$line" | awk '{print $4}' | grep -oE ':[0-9]+$' | tr -d ':')
+      [[ -z "$port" ]] && continue
+
+      local dup=false
+      for sp in "${seen_ports[@]:-}"; do [[ "$sp" == "$port" ]] && dup=true && break; done
+      $dup && continue
+      seen_ports+=("$port")
+
+      # Get process info from lsof or /proc
+      local pid; pid=$(get_pids_for_port "$port" | head -1)
+      local cmd_name=""; local user=""
+      if [[ -n "$pid" ]]; then
+        cmd_name=$(get_process_name "$pid")
+        user=$(get_process_user "$pid")
+      fi
+      local label; label=$(known_port_name "$port")
+      display_rows+=("${port}|${cmd_name}|${pid:-?}|${user}|${label}")
+    done
+  fi
+
+  if [[ ${#display_rows[@]} -eq 0 ]]; then
+    info "No listening ports found."
+    echo ""; return 0
+  fi
+
+  # Sort by port number and display
+  local sorted_rows
+  sorted_rows=$(printf '%s\n' "${display_rows[@]}" | sort -t'|' -k1,1n)
+
+  # Header
+  printf "  ${BOLD}%-8s  %-20s  %-8s  %-12s  %s${RESET}\n" \
+    "PORT" "PROCESS" "PID" "USER" "SERVICE"
+  div
+
+  while IFS='|' read -r port cmd_name pid user label; do
+    [[ -z "$port" ]] && continue
+
+    # Color ports under 1024 differently (system ports)
+    local port_color="$CYAN"
+    [[ "$port" -lt 1024 ]] && port_color="$MAGENTA"
+
+    local label_str=""
+    [[ -n "$label" ]] && label_str="${DIM}${label}${RESET}"
+
+    printf "  %b%-8s${RESET}  ${BOLD}%-20s${RESET}  ${DIM}%-8s${RESET}  %-12s  %b\n" \
+      "$port_color" "$port" \
+      "${cmd_name:0:20}" \
+      "$pid" \
+      "${user:0:12}" \
+      "$label_str"
+  done <<< "$sorted_rows"
+
+  echo ""
+  ok "${#seen_ports[@]} active listening port(s)"
+  info "Inspect a port: ${BOLD}portman <port>${RESET}   Kill a port: ${BOLD}portman kill <port>${RESET}"
+  echo ""
+
+  log_history "list — found ${#seen_ports[@]} ports"
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: portman watch <port>
+# Live-watch a port — refreshes every 2 seconds.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_watch() {
+  local port="$1"
+  validate_port "$port" || return 1
+
+  echo -e "\n  ${CYAN}${BOLD}Watching port ${port}${RESET}  ${DIM}(Ctrl+C to stop)${RESET}\n"
+
+  local prev_state=""
+
+  while true; do
+    local pids=()
+    while IFS= read -r pid; do
+      [[ -n "$pid" ]] && pids+=("$pid")
+    done < <(get_pids_for_port "$port")
+
+    local state
+    if [[ ${#pids[@]} -eq 0 ]]; then
+      state="free"
+    else
+      state="used:${pids[*]}"
+    fi
+
+    # Clear and redraw only on change
+    if [[ "$state" != "$prev_state" ]]; then
+      local ts; ts=$(date '+%H:%M:%S')
+      echo -ne "\r\033[K"  # clear line
+
+      if [[ "$state" == "free" ]]; then
+        echo -e "  ${ts}  Port ${BOLD}${port}${RESET}  ${GREEN}●  FREE${RESET}              "
+      else
+        for pid in "${pids[@]}"; do
+          local name; name=$(get_process_name "$pid")
+          echo -e "  ${ts}  Port ${BOLD}${port}${RESET}  ${RED}●  IN USE${RESET}  PID ${BOLD}${pid}${RESET}  ${name}"
+        done
+      fi
+      prev_state="$state"
+    fi
+
+    sleep 2
+  done
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: portman history
+# Show recent portman operations.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_history() {
+  banner; section "Operation History"
+
+  if [[ ! -s "$PORTMAN_HISTORY_FILE" ]]; then
+    info "No history yet."
+    echo ""; return
+  fi
+
+  local _reversed
+  _reversed=$(tail -30 "$PORTMAN_HISTORY_FILE" | \
+    awk '{lines[NR]=$0} END {for(i=NR;i>=1;i--) print lines[i]}')
+
+  local count=0
+  while IFS= read -r line; do
+    [[ -z "$line" ]] && continue
+    local ts; ts=$(echo "$line" | awk '{print $1, $2}')
+    local op; op=$(echo "$line" | cut -d' ' -f3-)
+    if echo "$op" | grep -q "kill"; then
+      echo -e "  ${RED}⚡${RESET}  ${DIM}${ts}${RESET}  ${op}"
+    else
+      echo -e "  ${CYAN}→${RESET}  ${DIM}${ts}${RESET}  ${op}"
+    fi
+    count=$((count+1))
+  done <<< "$_reversed"
+
+  echo ""
+  ok "Last ${count} operations"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: portman help
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_help() {
+  echo ""
+  echo -e "${CYAN}${BOLD}   ╔═╗╔═╗╦═╗╔╦╗╔╦╗╔═╗╔╗╔${RESET}"
+  echo -e "${CYAN}${BOLD}   ╠═╝║ ║╠╦╝ ║ ║║║╠═╣║║║${RESET}"
+  echo -e "${CYAN}${BOLD}   ╩  ╚═╝╩╚═ ╩ ╩ ╩╩ ╩╝╚╝${RESET}"
+  echo ""
+  echo -e "  ${WHITE}${BOLD}  portman v1.0${RESET}  ${DIM}·  By ${BOLD}UTKARSH OJHA${RESET}${DIM}  ·  Port Manager for macOS & Linux${RESET}"
+  echo ""
+  echo -e "${DIM}  ┌──────────────────────────────────────────────────────────────┐${RESET}"
+  echo -e "${DIM}  │${RESET}  ${WHITE}Find it. Kill it. Own the port.${RESET}                          ${DIM}│${RESET}"
+  echo -e "${DIM}  └──────────────────────────────────────────────────────────────┘${RESET}"
+  echo ""
+
+  echo -e "  ${CYAN}${BOLD}  ┌─ Core ─────────────────────────────────────────────────────┐${RESET}"
+  printf "  ${CYAN}  │${RESET}  ${GREEN}${BOLD}%-22s${RESET}  %s\n" "portman <port>"        "show what's running on a port"
+  printf "  ${CYAN}  │${RESET}  ${GREEN}${BOLD}%-22s${RESET}  %s\n" "portman kill <port>"   "kill process(es) on a port"
+  printf "  ${CYAN}  │${RESET}  ${GREEN}${BOLD}%-22s${RESET}  %s\n" "portman list"          "list all active listening ports"
+  printf "  ${CYAN}  │${RESET}  ${GREEN}${BOLD}%-22s${RESET}  %s\n" "portman watch <port>"  "live-watch a port (Ctrl+C to stop)"
+  echo -e "  ${CYAN}${BOLD}  └────────────────────────────────────────────────────────────┘${RESET}"
+  echo ""
+
+  echo -e "  ${YELLOW}${BOLD}  ┌─ Info ─────────────────────────────────────────────────────┐${RESET}"
+  printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-22s${RESET}  %s\n" "portman history"       "show recent portman operations"
+  printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-22s${RESET}  %s\n" "portman help"          "this screen"
+  echo -e "  ${YELLOW}${BOLD}  └────────────────────────────────────────────────────────────┘${RESET}"
+
+  echo ""
+  echo -e "  ${WHITE}${BOLD}  EXAMPLES${RESET}"
+  echo ""
+  echo -e "    ${DIM}\$${RESET} ${BOLD}portman 3000${RESET}            ${DIM}# what's on port 3000?${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}portman kill 3000${RESET}       ${DIM}# kill it${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}portman list${RESET}            ${DIM}# all active ports${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}portman watch 8080${RESET}      ${DIM}# live-watch port 8080${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}portman kill 5432${RESET}       ${DIM}# free up PostgreSQL${RESET}"
+  echo ""
+  echo -e "  ${WHITE}${BOLD}  WELL-KNOWN PORTS${RESET}"
+  echo ""
+  echo -e "    ${DIM}3000  Node/React   5000  Flask       5432  PostgreSQL${RESET}"
+  echo -e "    ${DIM}5173  Vite         8080  Java/HTTP   6379  Redis${RESET}"
+  echo -e "    ${DIM}8888  Jupyter      9200  Elastic     27017 MongoDB${RESET}"
+  echo ""
+  echo -e "${DIM}  ─────────────────────────────────────────────────────────────${RESET}"
+  echo -e "  ${DIM}  Report issues: ${CYAN}https://github.com/utkarsh-ojha/utility${RESET}"
+  echo ""
+}
+
+# ─── Entry point ──────────────────────────────────────────────────────────────
+detect_platform
+
+CMD="${1:-help}"
+shift || true
+
+case "$CMD" in
+  kill)               cmd_kill "${1:-}" ;;
+  list|ls)            cmd_list ;;
+  watch)              cmd_watch "${1:-}" ;;
+  history)            cmd_history ;;
+  help|-h|--help)     cmd_help ;;
+  *)
+    # Bare port number
+    if [[ "$CMD" =~ ^[0-9]+$ ]]; then
+      cmd_show "$CMD"
+    else
+      err "Unknown command: ${CMD}"
+      echo -e "  ${DIM}Run ${BOLD}portman help${RESET}${DIM} for all commands.${RESET}"
+      echo ""; exit 1
+    fi ;;
+esac
