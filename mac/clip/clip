@@ -378,26 +378,25 @@ cmd_setup() {
   step "Installing clip to ${install_path}..."
 
   if [[ "$script_src" == "$install_path" ]]; then
-    err "Cannot symlink to itself. Run setup from the source script, not from ${install_path}"
-    echo ""; return 1
-  fi
-
-  if [[ -L "$install_path" || -f "$install_path" ]]; then
-    warn "${install_path} already exists — replacing"
-    if [[ -w "/usr/local/bin" ]]; then
-      rm -f "$install_path"
-    else
-      sudo rm -f "$install_path"
-    fi
-  fi
-
-  if [[ -w "/usr/local/bin" ]]; then
-    ln -sf "$script_src" "$install_path"
+    ok "clip is already installed at ${install_path} — skipping symlink"
   else
-    info "Requires sudo to write to /usr/local/bin"
-    sudo ln -sf "$script_src" "$install_path"
+    if [[ -L "$install_path" || -f "$install_path" ]]; then
+      warn "${install_path} already exists — replacing"
+      if [[ -w "/usr/local/bin" ]]; then
+        rm -f "$install_path"
+      else
+        sudo rm -f "$install_path"
+      fi
+    fi
+
+    if [[ -w "/usr/local/bin" ]]; then
+      ln -sf "$script_src" "$install_path"
+    else
+      info "Requires sudo to write to /usr/local/bin"
+      sudo ln -sf "$script_src" "$install_path"
+    fi
+    ok "Symlinked ${install_path} → ${script_src}"
   fi
-  ok "Symlinked ${install_path} → ${script_src}"
 
   # Step 2: Create LaunchAgent plist
   step "Creating LaunchAgent at ${PLIST_PATH}..."
