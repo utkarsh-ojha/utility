@@ -97,9 +97,8 @@ cmd_history() {
   [[ "$count" -gt "$total" ]] && count="$total"
 
   local idx=1
+  local reversed; reversed=$(tail -n "$count" "$HISTORY_FILE" | awk '{lines[NR]=$0} END {for(i=NR;i>=1;i--) print lines[i]}')
   # Read from bottom (most recent) upward
-  tail -n "$count" "$HISTORY_FILE" | \
-  awk '{lines[NR]=$0} END {for(i=NR;i>=1;i--) print lines[i]}' | \
   while IFS='|' read -r timestamp encoded; do
     [[ -z "$encoded" ]] && continue
     local decoded; decoded=$(echo "$encoded" | b64_decode)
@@ -109,7 +108,7 @@ cmd_history() {
 
     printf "  ${CYAN}${BOLD}[%3d]${RESET}  ${GREY}%s${RESET}  %s\n" "$idx" "$timestamp" "$preview"
     idx=$((idx + 1))
-  done
+  done <<< "$reversed"
 
   echo ""
   ok "${total} total item(s) in history"
@@ -208,8 +207,8 @@ cmd_search() {
   local found=0
   local idx=1
 
+  local reversed; reversed=$(awk '{lines[NR]=$0} END {for(i=NR;i>=1;i--) print lines[i]}' "$HISTORY_FILE")
   # Read from bottom (most recent) upward
-  awk '{lines[NR]=$0} END {for(i=NR;i>=1;i--) print lines[i]}' "$HISTORY_FILE" | \
   while IFS='|' read -r timestamp encoded; do
     [[ -z "$encoded" ]] && { idx=$((idx + 1)); continue; }
     local decoded; decoded=$(echo "$encoded" | b64_decode)
@@ -221,7 +220,7 @@ cmd_search() {
       found=$((found + 1))
     fi
     idx=$((idx + 1))
-  done
+  done <<< "$reversed"
 
   echo ""
   info "Use ${BOLD}clip copy <n>${RESET} to recall an item"
@@ -361,14 +360,35 @@ cmd_status() {
 cmd_setup() {
   banner; section "Setup & Install"
 
-  local script_src; script_src=$(cd "$(dirname "$0")" && pwd)/$(basename "$0")
+  # Resolve the real path of this script, following all symlinks
+  local script_src="$0"
+  while [[ -L "$script_src" ]]; do
+    local link_target; link_target=$(readlink "$script_src")
+    if [[ "$link_target" == /* ]]; then
+      script_src="$link_target"
+    else
+      script_src="$(cd "$(dirname "$script_src")" && pwd)/${link_target}"
+    fi
+  done
+  script_src="$(cd "$(dirname "$script_src")" && pwd)/$(basename "$script_src")"
+
   local install_path="/usr/local/bin/clip"
 
   # Step 1: Symlink to /usr/local/bin
   step "Installing clip to ${install_path}..."
 
+  if [[ "$script_src" == "$install_path" ]]; then
+    err "Cannot symlink to itself. Run setup from the source script, not from ${install_path}"
+    echo ""; return 1
+  fi
+
   if [[ -L "$install_path" || -f "$install_path" ]]; then
     warn "${install_path} already exists — replacing"
+    if [[ -w "/usr/local/bin" ]]; then
+      rm -f "$install_path"
+    else
+      sudo rm -f "$install_path"
+    fi
   fi
 
   if [[ -w "/usr/local/bin" ]]; then
@@ -377,8 +397,7 @@ cmd_setup() {
     info "Requires sudo to write to /usr/local/bin"
     sudo ln -sf "$script_src" "$install_path"
   fi
-  chmod +x "$install_path"
-  ok "Symlinked to ${install_path}"
+  ok "Symlinked ${install_path} → ${script_src}"
 
   # Step 2: Create LaunchAgent plist
   step "Creating LaunchAgent at ${PLIST_PATH}..."
