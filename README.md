@@ -7,7 +7,7 @@
 
 ## About
 
-This repository is a growing toolkit of single-file bash scripts that solve everyday developer annoyances: managing Java versions, freeing up ports, and more. Each utility is self-contained, requires no external dependencies, and can be installed with a single `curl` command.
+This repository is a growing toolkit of single-file bash scripts that solve everyday developer annoyances: managing Java versions, freeing up ports, tracking clipboard history, and more. Each utility is self-contained, requires no external dependencies, and can be installed with a single `curl` command.
 
 ---
 
@@ -17,6 +17,7 @@ This repository is a growing toolkit of single-file bash scripts that solve ever
 |---|---------|-------------|---------|
 | 1 | [☕ jvm](mac/jvm/) | **Java Version Manager** — install, switch, and manage multiple Java versions | `curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/jvm/jvm -o ~/Downloads/jvm && chmod +x ~/Downloads/jvm && sudo mv ~/Downloads/jvm /usr/local/bin/jvm` |
 | 2 | [🔌 portman](mac/portman/) | **Port Manager** — find what's running on any port, kill it, list all active ports | `curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/portman/portman -o ~/Downloads/portman && chmod +x ~/Downloads/portman && sudo mv ~/Downloads/portman /usr/local/bin/portman` |
+| 3 | [📋 clip](mac/clip/) | **Clipboard History Manager** — persistent clipboard history with search and recall | `curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/clip/clip -o ~/Downloads/clip && chmod +x ~/Downloads/clip && sudo mv ~/Downloads/clip /usr/local/bin/clip` |
 
 ---
 
@@ -49,6 +50,21 @@ portman watch 8080     # live-watch a port
 ```
 
 > [Full documentation →](mac/portman/README.md)
+
+---
+
+### 📋 clip — Clipboard History Manager
+
+Persistent clipboard history for macOS. Every copy is saved, searchable, and recallable. Auto-starts on boot via LaunchAgent.
+
+```bash
+clip setup                # one-time install + auto-start
+clip history              # see your clipboard history
+clip copy 3               # re-copy the 3rd most recent item
+clip search "api key"     # find matching entries
+```
+
+> [Full documentation →](mac/clip/README.md)
 
 ---
 
