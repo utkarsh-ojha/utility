@@ -139,9 +139,28 @@ portman automatically labels these common ports:
 
 ---
 
+## Troubleshooting
+
+| Problem | Solution |
+|---|---|
+| `portman: command not found` | Run `sudo mv ~/Downloads/portman /usr/local/bin/portman` or use `/opt/homebrew/bin/portman` on Apple Silicon |
+| `Permission denied` when killing | portman will auto-retry with `sudo`. If that fails, run `sudo portman kill <port>` |
+| `No active listening ports found` | Ensure services are running. Try `lsof -nP -iTCP -sTCP:LISTEN` manually |
+| Port shows free but app won't bind | A TIME_WAIT state may be holding the port. Wait ~60s or use `SO_REUSEADDR` |
+
+---
+
+## Upgrade
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/portman/portman -o /tmp/portman && chmod +x /tmp/portman && sudo mv /tmp/portman /usr/local/bin/portman
+```
+
+---
+
 ## License
 
-MIT — free to use, modify, and distribute.
+GPL-3.0 — see [LICENSE](../../LICENSE) for details.
 
 ---
 

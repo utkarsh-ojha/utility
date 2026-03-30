@@ -8,6 +8,7 @@
 #   portman kill <port>   kill the process on this port
 #   portman list          show all active listening ports
 #   portman watch <port>  live-watch a port (refresh every 2s)
+#   portman history       show recent operations
 #   portman help
 # =============================================================================
 
@@ -17,7 +18,10 @@ set -eo pipefail
 BOLD="\033[1m"; DIM="\033[2m"; RESET="\033[0m"
 RED="\033[0;31m"; GREEN="\033[0;32m"; YELLOW="\033[1;33m"
 CYAN="\033[0;36m"; BLUE="\033[0;34m"; MAGENTA="\033[0;35m"
-WHITE="\033[1;37m"
+WHITE="\033[1;37m"; GREY="\033[0;90m"
+
+# ─── Constants ────────────────────────────────────────────────────────────────────
+PORTMAN_VERSION="1.0"
 
 # ─── Data paths ───────────────────────────────────────────────────────────────
 PORTMAN_DATA_DIR="${HOME}/.portman"
@@ -37,7 +41,7 @@ step()    { echo -e "  ${MAGENTA}◆${RESET} $*"; }
 
 banner() {
   echo ""
-  echo -e "${CYAN}${BOLD}  🔌  portman — Port Manager${RESET}"
+  echo -e "${CYAN}${BOLD}  🔌  portman v${PORTMAN_VERSION}${RESET}  ${DIM}·  By ${BOLD}UTKARSH OJHA${RESET}${DIM}  ·  Port Manager${RESET}"
   echo -e "${DIM}  Find it. Kill it. Own the port.${RESET}"
   div; echo ""
 }
@@ -50,7 +54,14 @@ detect_platform() {
     *)      OS="unknown" ;;
   esac
 }
-
+# ─── sed -i compatibility (macOS vs Linux) ───────────────────────────────────
+sed_inplace() {
+  if [[ "$OS" == "macos" ]]; then
+    sed -i '' "$@"
+  else
+    sed -i "$@"
+  fi
+}
 # ─── Core: get process info for a port ───────────────────────────────────────
 # Returns lines: PID PROTO USER PROCESS_NAME COMMAND
 get_port_info() {
@@ -423,6 +434,7 @@ cmd_list() {
   echo ""
   ok "${#seen_ports[@]} active listening port(s)"
   info "Inspect a port: ${BOLD}portman <port>${RESET}   Kill a port: ${BOLD}portman kill <port>${RESET}"
+  echo -e "  ${DIM}Ports < 1024 shown in magenta (system/privileged ports)${RESET}"
   echo ""
 
   log_history "list — found ${#seen_ports[@]} ports"
@@ -437,6 +449,8 @@ cmd_watch() {
   validate_port "$port" || return 1
 
   echo -e "\n  ${CYAN}${BOLD}Watching port ${port}${RESET}  ${DIM}(Ctrl+C to stop)${RESET}\n"
+
+  trap 'echo ""; ok "Stopped watching port ${port}"; echo ""; exit 0' INT TERM
 
   local prev_state=""
 
@@ -485,9 +499,11 @@ cmd_history() {
     echo ""; return
   fi
 
+  local _lines; _lines=$(tail -30 "$PORTMAN_HISTORY_FILE")
   local _reversed
-  _reversed=$(tail -30 "$PORTMAN_HISTORY_FILE" | \
-    awk '{lines[NR]=$0} END {for(i=NR;i>=1;i--) print lines[i]}')
+  _reversed=$(echo "$_lines" | tail -r 2>/dev/null) || \
+  _reversed=$(echo "$_lines" | tac 2>/dev/null) || \
+  _reversed=$(echo "$_lines" | awk '{lines[NR]=$0} END {for(i=NR;i>=1;i--) print lines[i]}')
 
   local count=0
   while IFS= read -r line; do
@@ -516,7 +532,7 @@ cmd_help() {
   echo -e "${CYAN}${BOLD}   ╠═╝║ ║╠╦╝ ║ ║║║╠═╣║║║${RESET}"
   echo -e "${CYAN}${BOLD}   ╩  ╚═╝╩╚═ ╩ ╩ ╩╩ ╩╝╚╝${RESET}"
   echo ""
-  echo -e "  ${WHITE}${BOLD}  portman v1.0${RESET}  ${DIM}·  By ${BOLD}UTKARSH OJHA${RESET}${DIM}  ·  Port Manager for macOS & Linux${RESET}"
+  echo -e "  ${WHITE}${BOLD}  portman v${PORTMAN_VERSION}${RESET}  ${DIM}·  By ${BOLD}UTKARSH OJHA${RESET}${DIM}  ·  Port Manager for macOS & Linux${RESET}"
   echo ""
   echo -e "${DIM}  ┌──────────────────────────────────────────────────────────────┐${RESET}"
   echo -e "${DIM}  │${RESET}  ${WHITE}Find it. Kill it. Own the port.${RESET}                          ${DIM}│${RESET}"

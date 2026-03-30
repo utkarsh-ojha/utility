@@ -56,13 +56,14 @@ portman watch 8080     # live-watch a port
 
 ### 📋 clip — Clipboard History Manager
 
-Persistent clipboard history for macOS. Every copy is saved, searchable, and recallable. Auto-starts on boot via LaunchAgent.
+Persistent clipboard history for macOS. Every copy is saved, searchable, and recallable. Supports pause/resume and auto-starts on boot via LaunchAgent.
 
 ```bash
-clip setup                # one-time install + auto-start
+clip install              # one-time install + auto-start
 clip history              # see your clipboard history
 clip copy 3               # re-copy the 3rd most recent item
 clip search "api key"     # find matching entries
+clip pause                # pause tracking without stopping
 ```
 
 > [Full documentation →](mac/clip/README.md)
@@ -71,14 +72,15 @@ clip search "api key"     # find matching entries
 
 ### 📂 goto — Directory Bookmark Engine
 
-Bookmark any directory with a short alias and jump back instantly. Supports sub-pathing, dead link detection, and works across shell restarts.
+Bookmark any directory with a short alias and jump back instantly. Supports sub-pathing, fuzzy matching, jump history, export/import, tab completion, and dead link detection.
 
 ```bash
 cd ~/projects/myapp
 goto add myapp            # bookmark this directory
 goto myapp                # 🚀 jump back from anywhere
 goto myapp/src            # jump into a sub-path
-goto list                 # see all bookmarks
+goto history              # see recent jumps
+goto export > bk.txt      # backup bookmarks
 ```
 
 > [Full documentation →](mac/goto/README.md)

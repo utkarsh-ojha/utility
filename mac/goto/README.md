@@ -16,6 +16,10 @@ You `cd` into the same deep directories every day. You type long paths over and 
 - **Persistent bookmarks** — saved to `~/.goto_registry`, survives reboots
 - **Sub-pathing** — `goto myproj/src/components` jumps to bookmark + sub-path
 - **Auto-naming** — `goto add` with no argument uses the current folder name
+- **Jump history** — `goto history` shows your recent jumps
+- **Fuzzy matching** — typo a bookmark name? goto suggests similar matches
+- **Export / Import** — `goto export > bk.txt` and `goto import bk.txt` for backup/sharing
+- **Tab completion** — bookmark names auto-complete after install
 - **Dead link detection** — detects deleted paths and offers to clean them up
 - **Shell function wrapper** — actually changes your terminal's directory (not a sub-shell)
 - **Cross-platform** — works on macOS (BSD) and Linux (GNU)
@@ -83,7 +87,10 @@ goto myapp/src/components
 | `goto list` | Show all bookmarks with paths |
 | `goto remove <name>` | Delete a specific bookmark |
 | `goto clean` | Wipe all bookmarks (with y/n confirmation) |
-| `goto install` | Install goto + inject shell function |
+| `goto history` | Show recent jump history (last 30) |
+| `goto export` | Export bookmarks to stdout (pipe to file) |
+| `goto import <file>` | Import bookmarks from a file |
+| `goto install` | Install goto + inject shell function + tab completion |
 | `goto uninstall` | Remove symlink, shell function, and registry |
 | `goto help` | Full help screen |
 
@@ -107,6 +114,13 @@ goto api                    # 🚀 jumps to ~/projects/backend/api
 goto frontend/src           # jumps to ~/projects/frontend/src
 goto api/routes/v1          # jumps to ~/projects/backend/api/routes/v1
 
+# History
+goto history                # see recent jumps with timestamps
+
+# Export / Import
+goto export > bookmarks.txt      # backup all bookmarks
+goto import bookmarks.txt        # restore on another machine
+
 # Manage bookmarks
 goto list                   # see all bookmarks
 goto remove frontend        # delete a bookmark
@@ -126,6 +140,8 @@ goto uninstall              # undo everything
 3. **The cd Trick** — The script outputs a special `__goto_cd__:/path` string; the shell function captures it and runs `cd /path` in the parent shell
 4. **Sub-pathing** — `goto myproj/src` splits into alias `myproj` + sub-path `/src`, then joins them
 5. **Dead Links** — If a bookmarked path no longer exists, goto detects it and offers to remove the dead bookmark
+6. **Tab Completion** — `goto install` injects a `complete -F` handler so bookmark names auto-complete
+7. **Fuzzy Matching** — If a bookmark isn't found, goto searches for partial matches and suggests them
 
 ### Why a Shell Function?
 
@@ -143,6 +159,28 @@ Running `goto uninstall` reverses everything:
 - Removes the shell function from `.zshrc`/`.bashrc`
 - Removes the `/usr/local/bin/goto` symlink
 - Deletes the `~/.goto_registry` file
+
+---
+
+## Troubleshooting
+
+| Problem | Fix |
+|---|---|
+| `goto: command not found` | Run `source ~/.zshrc` or restart your terminal |
+| `goto` doesn't change directory | Run `goto install` and `source ~/.zshrc` — the shell function is required |
+| Tab completion not working | Run `goto install` again and `source ~/.zshrc` |
+| Dead bookmark paths | `goto list` shows them in red; use `goto remove <name>` to clean up |
+| Import fails with errors | Check that the file uses `alias\|path` format, one per line |
+
+---
+
+## Upgrade
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/goto/goto -o ~/Downloads/goto && chmod +x ~/Downloads/goto && sudo mv ~/Downloads/goto /usr/local/bin/goto
+```
+
+Your bookmarks (`~/.goto_registry`) and jump history (`~/.goto_history`) are untouched during upgrades. Run `goto install` again to update the shell function and tab completion.
 
 ---
 

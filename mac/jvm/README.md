@@ -30,14 +30,14 @@ Managing Java versions on macOS is painful. `JAVA_HOME` breaks, Homebrew install
 ## Run the below script with sudo, to install this utility
 
 ```bash
-curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/jvm -o ~/Downloads/jvm && chmod +x ~/Downloads/jvm && sudo mv ~/Downloads/jvm /usr/local/bin/jvm
+curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/jvm/jvm -o ~/Downloads/jvm && chmod +x ~/Downloads/jvm && sudo mv ~/Downloads/jvm /usr/local/bin/jvm
 ```
 
 ## Install with, one step at a time
 
 ```bash
 # Download and install
-curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/blob/main/mac/jvm -o ~/Downloads/jvm
+curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/jvm/jvm -o ~/Downloads/jvm
 chmod +x ~/Downloads/jvm
 sudo mv ~/Downloads/jvm /usr/local/bin/jvm
 
@@ -157,7 +157,7 @@ Every new terminal picks this up automatically. For the **current terminal**, ru
 
 **1. Download and install the script**
 ```bash
-curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/blob/main/mac/jvm -o ~/Downloads/jvm
+curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/jvm/jvm -o ~/Downloads/jvm
 chmod +x ~/Downloads/jvm
 sudo mv ~/Downloads/jvm /usr/local/bin/jvm
 ```
@@ -188,10 +188,36 @@ jvm doctor
 
 ---
 
-## License
+## Troubleshooting
 
-MIT — free to use, modify, and distribute.
+| Problem | Solution |
+|---|---|
+| `jvm: command not found` | Run `sudo mv ~/Downloads/jvm /usr/local/bin/jvm` or use `/opt/homebrew/bin/jvm` on Apple Silicon |
+| `JAVA_HOME not set after jvm use` | Run `source ~/.zshrc` (or `source ~/.bashrc`) in your current terminal |
+| `jvm doctor` shows warnings | Follow the doctor's suggested fixes — it diagnoses the exact issue |
+| `jvm install` fails | Ensure Homebrew is installed: `brew --version`. If not, install it first |
+| `Permission denied` | Use `sudo` when moving the script: `sudo mv ~/Downloads/jvm /usr/local/bin/jvm` |
 
 ---
 
-<p align="center">Made with ☕ by <a href="https://github.com/utkarshojha">Utkarsh Ojha</a></p>
+## Upgrade
+
+```bash
+jvm update
+```
+
+Or manually re-download:
+
+```bash
+curl -fsSL https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/jvm/jvm -o /tmp/jvm && chmod +x /tmp/jvm && sudo mv /tmp/jvm /usr/local/bin/jvm
+```
+
+---
+
+## License
+
+GPL-3.0 — see [LICENSE](../../LICENSE) for details.
+
+---
+
+<p align="center">Made with ☕ by <a href="https://github.com/utkarsh-ojha">Utkarsh Ojha</a></p>

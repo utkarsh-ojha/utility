@@ -1,102 +1,15 @@
 #!/usr/bin/env bash
-
-###############################################
-# First-time setup guide for any Mac:
-
-# ---
-
-# **Step 1 — Download the script**
-
-# Download the `jvm` file and save it to your Downloads folder.
-
-# ---
-
-# **Step 2 — Install it**
-
-# Open Terminal and run:
-
-# ```bash
-# chmod +x ~/Downloads/jvm
-# sudo mv ~/Downloads/jvm /usr/local/bin/jvm
-# ```
-
-# > If you're on Apple Silicon (M1/M2/M3) and get a "No such file or directory" error, use this instead:
-# > ```bash
-# > sudo mv ~/Downloads/jvm /opt/homebrew/bin/jvm
-# > ```
-
-# ---
-
-# **Step 3 — Verify it works**
-
-# ```bash
-# jvm help
-# ```
-
-# You should see the full command list printed.
-
-# ---
-
-# **Step 4 — Install Homebrew (if you don't have it)**
-
-# ```bash
-# /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"
-# ```
-
-# Skip this if `brew --version` already works.
-
-# ---
-
-# **Step 5 — Install your first Java version**
-
-# ```bash
-# jvm install 21
-# ```
-
-# Pick `temurin@21` from the menu — it's the most compatible option for all Macs including Apple Silicon.
-
-# ---
-
-# **Step 6 — Switch to it**
-
-# ```bash
-# jvm use 21
-# ```
-
-# ---
-
-# **Step 7 — Apply to current terminal**
-
-# ```bash
-# source ~/.zshrc
-# ```
-
-# ---
-
-# **Step 8 — Verify Java is working**
-
-# ```bash
-# java -version
-# echo $JAVA_HOME
-# jvm doctor
-# ```
-
-# All green? You're done.
-
-# ---
-
-# **From this point on**, every new terminal will have Java automatically. To switch versions in the future just run `jvm use <version>`. That's it.
-################################################
-
-
 # Note: -u (nounset) intentionally omitted — empty array expansion crashes under -u in bash/zsh
 set -eo pipefail
 
 # ─── Colours ─────────────────────────────────────────────────────────────────
-BOLD="\033[1m";  DIM="\033[2m";     RESET="\033[0m"
+BOLD="\033[1m"; DIM="\033[2m"; RESET="\033[0m"
 RED="\033[0;31m"; GREEN="\033[0;32m"; YELLOW="\033[1;33m"
 CYAN="\033[0;36m"; BLUE="\033[0;34m"; MAGENTA="\033[0;35m"
-WHITE="\033[1;37m"
+WHITE="\033[1;37m"; GREY="\033[0;90m"
+
+# ─── Constants ────────────────────────────────────────────────────────────────
+JVM_VERSION="1.0"
 
 # ─── Config paths ─────────────────────────────────────────────────────────────
 # All jvm state lives under ~/.jvm/: pinned versions, named aliases, switch history
@@ -167,8 +80,8 @@ step()    { echo -e "  ${MAGENTA}◆${RESET} $*"; }    # Action step being perfo
 
 banner() {
   echo ""
-  echo -e "${CYAN}${BOLD}  ☕ Java Version Manager - By: Utkarsh${RESET}"
-  echo -e "${DIM}  Platform: ${OS} / ${ARCH} / pkg:${PKG_MANAGER}${RESET}"
+  echo -e "${CYAN}${BOLD}  ☕  jvm v${JVM_VERSION}${RESET}  ${DIM}·  By ${BOLD}UTKARSH OJHA${RESET}${DIM}  ·  Java Version Manager${RESET}"
+  echo -e "${DIM}  Install it. Switch it. Own it.  (${OS}/${ARCH}/${PKG_MANAGER})${RESET}"
   div; echo ""
 }
 
@@ -361,6 +274,14 @@ scan_jvms() {
     _di=$((_di+1))
     [[ -d "$_base" ]] || continue
 
+    # Some Homebrew JVM roots (e.g. /opt/homebrew/opt/openjdk@21) are directly
+    # usable JAVA_HOME-like directories and may not be represented as child JVM dirs.
+    _register_jvm "${_base}"
+    [[ -d "${_base}/Contents/Home" ]] && _register_jvm "${_base}/Contents/Home"
+    for _sub in "libexec/openjdk.jdk/Contents/Home" "libexec/Contents/Home" "libexec"; do
+      [[ -d "${_base}/${_sub}" ]] && _register_jvm "${_base}/${_sub}"
+    done
+
     for _cand in "${_base}"/*/; do
       [[ "$_cand" == *'*/' ]] && continue
       [[ -d "$_cand" ]] || continue
@@ -532,7 +453,7 @@ cmd_help() {
   echo -e "${CYAN}${BOLD}   ║╠═╣╚╗╔╝╠═╣  ${GREEN}╚╗╔╝║╣ ╠╦╝╚═╗║║ ║║║║  ${YELLOW} ║║║╠═╣║║║╠═╣║ ╦║╣ ╠╦╝${RESET}"
   echo -e "${CYAN}${BOLD}  ╚╝╩ ╩ ╚╝ ╩ ╩  ${GREEN} ╚╝ ╚═╝╩╚═╚═╝╩╚═╝╝╚╝  ${YELLOW}╩ ╩╩╩ ╩╝╚╝╩ ╩╚═╝╚═╝╩╚═${RESET}"
   echo ""
-  echo -e "  ${WHITE}${BOLD}  ☕  v1.0${RESET}  ${DIM}·${RESET}  ${DIM}By ${BOLD}UTKARSH OJHA${RESET}${DIM}  ·  macOS (Apple Silicon + Intel) · Linux${RESET}"
+  echo -e "  ${WHITE}${BOLD}  ☕  v${JVM_VERSION}${RESET}  ${DIM}·${RESET}  ${DIM}By ${BOLD}UTKARSH OJHA${RESET}${DIM}  ·  macOS (Apple Silicon + Intel) · Linux${RESET}"
   echo ""
   echo -e "${DIM}  ┌──────────────────────────────────────────────────────────────────────┐${RESET}"
   echo -e "${DIM}  │${RESET}  ${WHITE}Install, switch & manage Java versions with a single command${RESET}  ${DIM}│${RESET}"
@@ -595,7 +516,7 @@ cmd_help() {
   echo -e "    ${DIM}\$${RESET} jvm pin 17             ${DIM}# protect Java 17 from removal${RESET}"
   echo ""
   echo -e "${DIM}  ────────────────────────────────────────────────────────────────${RESET}"
-  echo -e "  ${DIM}  Report issues: ${CYAN}https://github.com/utkarsh-ojha/utility.git${RESET}"
+  echo -e "  ${DIM}  Report issues: ${CYAN}https://github.com/utkarsh-ojha/utility${RESET}"
   echo ""
 }
 
@@ -1267,7 +1188,11 @@ cmd_history() {
   if [[ ! -s "$JVM_HISTORY_FILE" ]]; then
     info "No history yet. Use ${BOLD}jvm use <version>${RESET} to start."; echo ""; return
   fi
-  local _reversed; _reversed=$(tail -30 "$JVM_HISTORY_FILE" | awk '{lines[NR]=$0} END {for(i=NR;i>=1;i--) print lines[i]}')
+  local _lines; _lines=$(tail -30 "$JVM_HISTORY_FILE")
+  local _reversed
+  _reversed=$(echo "$_lines" | tail -r 2>/dev/null) || \
+  _reversed=$(echo "$_lines" | tac 2>/dev/null) || \
+  _reversed=$(echo "$_lines" | awk '{lines[NR]=$0} END {for(i=NR;i>=1;i--) print lines[i]}')
   local count=0
   while IFS= read -r line; do
     [[ -z "$line" ]] && continue
@@ -1338,7 +1263,7 @@ cmd_update() {
   local script_path; script_path=$(realpath "$0")
   info "Checking for updates..."
   if ! command -v curl &>/dev/null; then err "curl is required for updates."; return 1; fi
-  local update_url="${JVM_UPDATE_URL:-https://raw.githubusercontent.com/utkarsh-ojha/utility/blob/main/mac/jvm}"
+  local update_url="${JVM_UPDATE_URL:-https://raw.githubusercontent.com/utkarsh-ojha/utility/main/mac/jvm/jvm}"
   local tmp; tmp=$(mktemp)
   if curl -fsSL "$update_url" -o "$tmp" 2>/dev/null; then
     chmod +x "$tmp"

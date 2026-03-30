@@ -13,6 +13,8 @@
 #   clip uninstall        undo install (stop watcher, remove agent & symlink)
 #   clip start            start the clipboard watcher
 #   clip stop             stop the clipboard watcher
+#   clip pause            pause tracking without stopping the watcher
+#   clip resume           resume tracking after pause
 #   clip status           check if the watcher is running
 #   clip help
 # =============================================================================
@@ -34,6 +36,26 @@ POLL_INTERVAL=1
 PLIST_LABEL="com.user.clipbuddy"
 PLIST_PATH="${HOME}/Library/LaunchAgents/${PLIST_LABEL}.plist"
 PID_FILE="${HOME}/.clip_watcher.pid"
+PAUSE_FILE="${HOME}/.clip_paused"
+
+# ─── Platform detection ─────────────────────────────────────────────────────────
+detect_platform() {
+  case "$(uname -s)" in
+    Darwin) OS="macos" ;;
+    Linux)  OS="linux" ;;
+    *)      OS="unknown" ;;
+  esac
+}
+detect_platform
+
+# ─── sed -i compatibility (macOS vs Linux) ───────────────────────────────────
+sed_inplace() {
+  if [[ "$OS" == "macos" ]]; then
+    sed -i '' "$@"
+  else
+    sed -i "$@"
+  fi
+}
 
 touch "$HISTORY_FILE"
 
@@ -55,7 +77,11 @@ banner() {
 
 # ─── Base64 helpers (macOS-compatible) ────────────────────────────────────────
 b64_encode() { base64 | tr -d '\n'; }
-b64_decode() { base64 -D 2>/dev/null || base64 -d 2>/dev/null; }
+b64_decode() {
+  local result
+  result=$(base64 -D 2>/dev/null) || result=$(base64 -d 2>/dev/null) || { echo "[decode error]"; return 1; }
+  echo "$result"
+}
 
 # ─── Validate index ──────────────────────────────────────────────────────────
 validate_index() {
@@ -160,8 +186,7 @@ cmd_remove() {
 
   warn "Removing item [${idx}]: ${preview}"
 
-  # macOS sed requires '' after -i
-  sed -i '' "${line_num}d" "$HISTORY_FILE"
+  sed_inplace "${line_num}d" "$HISTORY_FILE"
 
   ok "Item [${idx}] removed — history re-indexed"
   echo ""
@@ -234,7 +259,15 @@ cmd_search() {
 cmd_watcher() {
   local last_hash=""
 
+  trap 'rm -f "$PID_FILE"; exit 0' INT TERM
+
   while true; do
+    # Skip if paused
+    if [[ -f "$PAUSE_FILE" ]]; then
+      sleep "$POLL_INTERVAL"
+      continue
+    fi
+
     local current; current=$(pbpaste 2>/dev/null || true)
 
     # Skip empty clipboard
@@ -259,7 +292,7 @@ cmd_watcher() {
           local total; total=$(wc -l < "$HISTORY_FILE" | tr -d ' ')
           if [[ "$total" -gt "$MAX_ENTRIES" ]]; then
             local excess=$((total - MAX_ENTRIES))
-            sed -i '' "1,${excess}d" "$HISTORY_FILE"
+            sed_inplace "1,${excess}d" "$HISTORY_FILE"
           fi
         fi
       fi
@@ -323,6 +356,41 @@ cmd_stop() {
 }
 
 # ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: clip pause
+# Pause the watcher without stopping the process.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_pause() {
+  banner; section "Pause Watcher"
+
+  if [[ -f "$PAUSE_FILE" ]]; then
+    ok "Watcher is already paused"
+    echo ""; return 0
+  fi
+
+  touch "$PAUSE_FILE"
+  ok "Watcher paused — clipboard changes will be ignored"
+  info "Resume with: ${BOLD}clip resume${RESET}"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
+# COMMAND: clip resume
+# Resume a paused watcher.
+# ═══════════════════════════════════════════════════════════════════════════════
+cmd_resume() {
+  banner; section "Resume Watcher"
+
+  if [[ ! -f "$PAUSE_FILE" ]]; then
+    ok "Watcher is not paused"
+    echo ""; return 0
+  fi
+
+  rm -f "$PAUSE_FILE"
+  ok "Watcher resumed — clipboard changes will be recorded"
+  echo ""
+}
+
+# ═══════════════════════════════════════════════════════════════════════════════
 # COMMAND: clip status
 # ═══════════════════════════════════════════════════════════════════════════════
 cmd_status() {
@@ -351,6 +419,9 @@ cmd_status() {
   info "History: ${BOLD}${total}${RESET} item(s) stored"
   info "History file: ${DIM}${HISTORY_FILE}${RESET}"
   info "Max entries: ${BOLD}${MAX_ENTRIES}${RESET}"
+  if [[ -f "$PAUSE_FILE" ]]; then
+    echo -e "  ${YELLOW}⏸${RESET}  Watcher is ${YELLOW}${BOLD}paused${RESET}"
+  fi
   echo ""
 }
 
@@ -527,6 +598,8 @@ cmd_help() {
   echo -e "  ${YELLOW}${BOLD}  ┌─ Watcher ──────────────────────────────────────────────────┐${RESET}"
   printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip start"             "start the clipboard watcher"
   printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip stop"              "stop the clipboard watcher"
+  printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip pause"             "pause the watcher (keep running)"
+  printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip resume"            "resume a paused watcher"
   printf "  ${YELLOW}  │${RESET}  ${GREEN}${BOLD}%-25s${RESET}  %s\n" "clip status"            "check if watcher is running"
   echo -e "  ${YELLOW}${BOLD}  └────────────────────────────────────────────────────────────┘${RESET}"
   echo ""
@@ -550,6 +623,8 @@ cmd_help() {
   echo -e "    ${DIM}\$${RESET} ${BOLD}clip search \"api key\"${RESET}    ${DIM}# find entries containing \"api key\"${RESET}"
   echo -e "    ${DIM}\$${RESET} ${BOLD}clip remove 5${RESET}            ${DIM}# delete the 5th entry${RESET}"
   echo -e "    ${DIM}\$${RESET} ${BOLD}clip clean${RESET}               ${DIM}# wipe everything${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}clip pause${RESET}               ${DIM}# pause watcher without stopping${RESET}"
+  echo -e "    ${DIM}\$${RESET} ${BOLD}clip resume${RESET}              ${DIM}# resume paused watcher${RESET}"
   echo -e "    ${DIM}\$${RESET} ${BOLD}clip install${RESET}             ${DIM}# install + auto-start watcher${RESET}"
   echo -e "    ${DIM}\$${RESET} ${BOLD}clip uninstall${RESET}           ${DIM}# undo install${RESET}"
   echo ""
@@ -578,6 +653,8 @@ case "$CMD" in
   watcher)            cmd_watcher ;;
   start)              cmd_start ;;
   stop)               cmd_stop ;;
+  pause)              cmd_pause ;;
+  resume)             cmd_resume ;;
   status)             cmd_status ;;
   install|setup)      cmd_install ;;
   uninstall)           cmd_uninstall ;;
